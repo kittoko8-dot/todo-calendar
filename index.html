@@ -115,7 +115,9 @@ details.sec .list{margin-top:4px}
 .cell.sun .dn,.cell.hol .dn{color:var(--sun)} .cell.sat .dn{color:var(--sat)}
 .cell.today .dn{background:var(--today);color:var(--accent-fg)}
 .cell.sel{box-shadow:inset 0 0 0 2px var(--accent)}
-.ev{font-size:10px;line-height:15px;height:15px;border-radius:3px;padding:0 3px;white-space:nowrap;overflow:hidden;text-overflow:clip;color:#fff;font-weight:500}
+.ev{font-size:10px;line-height:1.3;border-radius:3px;padding:1px 2px;white-space:nowrap;overflow:hidden;text-overflow:clip;color:#fff;font-weight:500;letter-spacing:-.02em}
+/* label too long even at the smallest size: allow two lines */
+.ev.w2{white-space:normal;word-break:break-all;line-height:1.15;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .ev.todo{background:transparent;color:var(--fg);border-left:3px solid var(--lo);border-radius:0;padding-left:2px}
 .ev.todo.p3{border-color:var(--hi)} .ev.todo.p2{border-color:var(--mid)}
 .sqs{margin-top:auto;display:flex;flex-wrap:wrap;gap:2px;padding:2px 2px 1px;align-items:center}
@@ -514,6 +516,7 @@ function renderCal(){
     h += `<button class="${cls.join(' ')}" data-day="${d}" aria-label="${dt.getMonth()+1}月${dt.getDate()}日"><span class="dn">${dt.getDate()}</span>${vis.join('')}${marks.length > maxShow ? `<span class="more">+${marks.length-maxShow+1}</span>` : ''}${sqHtml}</button>`;
   }
   $('#grid').innerHTML = h;
+  fitLabels();
 
   const sd = parse(S.sel);
   const evs = eventsOn(S.sel), dto = todosOn(S.sel), tds = dto.open.concat(dto.done);
@@ -534,6 +537,28 @@ function renderCal(){
   }
   $('#day').innerHTML = dh;
 }
+
+// Shrink each calendar label until its whole text fits the cell width (10px → 7px).
+// If it still doesn't fit, wrap it onto two lines and shrink again (9px → 6.5px).
+function fitLabels(){
+  const els = document.querySelectorAll('#grid .ev');
+  els.forEach(el => {
+    el.classList.remove('w2'); el.style.fontSize = '';
+    let fs = 10;
+    while (el.scrollWidth > el.clientWidth + 0.5 && fs > 7) { fs -= 0.5; el.style.fontSize = fs + 'px'; }
+    if (el.scrollWidth > el.clientWidth + 0.5) {
+      el.classList.add('w2');
+      for (const lines of [2, 3]) {
+        el.style.webkitLineClamp = lines;
+        fs = 9; el.style.fontSize = fs + 'px';
+        while (el.scrollHeight > el.clientHeight + 0.5 && fs > 6.5) { fs -= 0.5; el.style.fontSize = fs + 'px'; }
+        if (el.scrollHeight <= el.clientHeight + 0.5) break;
+      }
+    } else el.style.webkitLineClamp = '';
+  });
+}
+let fitT;
+window.addEventListener('resize', () => { clearTimeout(fitT); fitT = setTimeout(() => { if (S.tab === 'cal') fitLabels(); }, 150); });
 
 /* ---------- shell ---------- */
 function render(){

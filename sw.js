@@ -1,6 +1,6 @@
 // Offline support: serve the app from the phone's cache first, refresh it in the background.
 // Bump CACHE when the app files change so phones pick up the new version on the next launch.
-const CACHE = 'tc-pwa-v1';
+const CACHE = 'tc-pwa-v2';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
