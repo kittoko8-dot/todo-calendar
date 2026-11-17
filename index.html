@@ -286,8 +286,8 @@ function b64enc(str){
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
   return btoa(bin);
 }
-function ghFetch(opts){
-  return fetch(`https://api.github.com/repos/${encodeURIComponent(BC.owner)}/${encodeURIComponent(BC.repo)}/contents/${BFILE}`, Object.assign({cache:'no-store'}, opts, {
+function ghFetch(opts, file){
+  return fetch(`https://api.github.com/repos/${encodeURIComponent(BC.owner)}/${encodeURIComponent(BC.repo)}/contents/${file || BFILE}`, Object.assign({cache:'no-store'}, opts, {
     headers: Object.assign({Authorization: 'Bearer ' + BC.token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'}, (opts && opts.headers) || {})
   }));
 }
@@ -358,14 +358,57 @@ function renderBk(){
   const st = $('#bk-stat');
   if (st) st.textContent = t + (BS.lastOkAt ? '\n最終成功：' + hm(BS.lastOkAt) : '');
 }
-window.addEventListener('online', () => { renderBk(); scheduleBackup(2000); });
+/* ---------- Todos checked off on the home-screen widget ---------- */
+// The widget writes {done: {todoId: doneAtMillis}} to widget-done.json; apply those here,
+// then remove the applied entries from the file.
+const WFILE = 'widget-done.json', WAPPLIED = 'tc-widget-applied';
+let widgetBusy = false;
+function b64dec(s){
+  const bin = atob(String(s || '').replace(/\s/g, ''));
+  return new TextDecoder().decode(Uint8Array.from(bin, ch => ch.charCodeAt(0)));
+}
+async function pullWidgetDone(){
+  if (widgetBusy || !configured() || !navigator.onLine) return;
+  widgetBusy = true;
+  try {
+    const r = await ghFetch({method:'GET'}, WFILE);
+    if (!r.ok) return; // 404 = nothing checked off on the widget yet
+    const meta = await r.json();
+    let done = {};
+    try { done = JSON.parse(b64dec(meta.content)).done || {}; } catch(e) { done = {}; }
+    const ids = Object.keys(done);
+    if (!ids.length) return;
+    const applied = loadJ(WAPPLIED, []);
+    let n = 0;
+    for (const id of ids) {
+      const key = id + ':' + done[id];
+      if (applied.includes(key)) continue; // already applied once; respect a later undo in the app
+      const t = S.todos.find(x => x.id === id);
+      if (t && !t.done) { t.done = true; t.doneAt = Number(done[id]) || Date.now(); n++; }
+      applied.push(key);
+    }
+    saveJ(WAPPLIED, applied.slice(-500));
+    if (n) { persist(); markChanged(); render(); toast(`ウィジェットで完了したTodoを反映しました（${n}件）`); }
+    // Clear the file so it doesn't grow; if the widget wrote meanwhile, the sha check fails and we retry later.
+    await ghFetch({method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({message:'ウィジェットの完了を反映', content: b64enc(JSON.stringify({done:{}})), sha: meta.sha})}, WFILE);
+  } catch(e) {
+    // offline or GitHub unreachable: try again next time the app opens
+  } finally { widgetBusy = false; }
+}
+
+window.addEventListener('online', () => { renderBk(); scheduleBackup(2000); setTimeout(pullWidgetDone, 1000); });
 window.addEventListener('offline', renderBk);
-document.addEventListener('visibilitychange', () => { if (document.hidden && isDirty() && configured() && navigator.onLine) backupNow(false); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { if (isDirty() && configured() && navigator.onLine) backupNow(false); }
+  else pullWidgetDone();
+});
 function initStore(){
   backend = localBackend();
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch(e) {}
   render(); renderBk();
   if (configured() && isDirty()) scheduleBackup(3000);
+  setTimeout(pullWidgetDone, 800);
 }
 
 /* ---------- backup & settings sheet ---------- */
