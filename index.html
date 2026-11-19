@@ -361,16 +361,43 @@ function renderBk(){
 /* ---------- Todos checked off on the home-screen widget ---------- */
 // The widget writes {done: {todoId: doneAtMillis}} to widget-done.json; apply those here,
 // then remove the applied entries from the file.
-const WFILE = 'widget-done.json', WAPPLIED = 'tc-widget-applied';
+const WFILE = 'widget-done.json', AFILE = 'widget-add.json', WAPPLIED = 'tc-widget-applied';
 let widgetBusy = false;
 function b64dec(s){
   const bin = atob(String(s || '').replace(/\s/g, ''));
   return new TextDecoder().decode(Uint8Array.from(bin, ch => ch.charCodeAt(0)));
 }
+// Todos added on the widget: {add: [todo, ...]} in widget-add.json. Import new ones, then clear the file.
+async function pullWidgetAdds(){
+  const r = await ghFetch({method:'GET'}, AFILE);
+  if (!r.ok) return 0;
+  const meta = await r.json();
+  let add = [];
+  try { add = JSON.parse(b64dec(meta.content)).add || []; } catch(e) { add = []; }
+  if (!Array.isArray(add) || !add.length) return 0;
+  let n = 0;
+  for (const t of add) {
+    if (!t || !t.id || !t.title || S.todos.some(x => x.id === t.id)) continue;
+    S.todos.push({
+      id: String(t.id), title: String(t.title).slice(0, 200),
+      priority: [1,2,3].includes(+t.priority) ? +t.priority : 2,
+      showFrom: /^\d{4}-\d{2}-\d{2}$/.test(t.showFrom || '') ? t.showFrom : today(),
+      due: /^\d{4}-\d{2}-\d{2}$/.test(t.due || '') ? t.due : '',
+      memo: '', done: false, created: Number(t.created) || Date.now()
+    });
+    n++;
+  }
+  if (n) { persist(); markChanged(); render(); }
+  await ghFetch({method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({message:'ウィジェットの追加を反映', content: b64enc(JSON.stringify({add:[]})), sha: meta.sha})}, AFILE);
+  return n;
+}
 async function pullWidgetDone(){
   if (widgetBusy || !configured() || !navigator.onLine) return;
   widgetBusy = true;
   try {
+    // Additions first: a Todo added and then checked off on the widget must exist before it can be completed.
+    try { const added = await pullWidgetAdds(); if (added) toast(`ウィジェットで追加したTodoを取り込みました（${added}件）`); } catch(e) {}
     const r = await ghFetch({method:'GET'}, WFILE);
     if (!r.ok) return; // 404 = nothing checked off on the widget yet
     const meta = await r.json();
